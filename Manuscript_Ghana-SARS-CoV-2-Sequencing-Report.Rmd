@@ -1,0 +1,662 @@
+---
+title: "GhanaCovid-19SequencingSummary"
+author: "WACCBIP"
+date: "6/3/2021"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+---
+
+```{r setup, include=FALSE}
+pacman::p_load(scran, patchwork, viridis, ggforce, gghalves, ggridges, scDblFinder, SingleR, intrinsicDimension, cluster, data.table, ggnetwork, ggplot2, tibble, tidyverse, dplyr,Seurat,glmGamPoi, devtools,reticulate,stringr,magrittr,ComplexHeatmap,circlize,viridis,svglite,liger,grr, Matrix.utils, comprehenr, PNWColors,  scater, pheatmap, ExperimentHub, AnnotationHub, SeuratData, SeuratDisk, ggsignif, GGally, RColorBrewer, MAST, slingshot, tradeSeq, clusterExperiment, ggpubr, clustree,phateR,mgcv, ComplexHeatmap, SingleCellExperiment, phateR, limma)
+
+pacman::p_load(plyr, ggplot2, gplots, grid, spatstat, raster, sp, dplyr, klaR, ggfortify, stringr, cluster, Rtsne, readr, RColorBrewer, Hmisc, mice, tidyr, purrr, VIM, magrittr, corrplot, caret, gridExtra, ape, tidytree, pheatmap, RColorBrewer, stats, vegan, FactoMineR, factoextra, outliers, ggpubr, table1,ggvis, ggsignif, qdap, wordcloud2, arsenal, knitr)
+
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(janitor)
+library("readxl")
+library(cowplot)
+library(ggthemes)
+library(ggrepel)
+library(ggalluvial)
+library("lubridate")
+library(ggtree)
+library(ape)
+library(treeio)
+library(scales) # to access breaks/formatting functions
+library(ggtreeExtra)
+library(ggstar)
+library(ggnewscale)
+library(pier)
+library(table1)
+
+
+custom_colors <- list()
+colors_dutch <- c(
+  '#45aaf2','#A3CB38','#1289A7','#D980FA','#F79F1F',
+  '#EE5A24','#009432','#833471','#1B1464','#0652DD',
+  '#006266','#EA2027','#1B1464','#5758BB','#6F1E51'
+)
+colors_spanish <- c(
+  '#40407a','#706fd3','#f7f1e3','#34ace0','#33d9b2',
+  '#2c2c54','#474787','#aaa69d','#227093','#218c74',
+  '#ff5252','#ff793f','#d1ccc0','#ffb142','#ffda79',
+  '#b33939','#cd6133','#84817a','#cc8e35','#ccae62'
+)
+custom_colors$discrete <- c(colors_dutch, colors_spanish)
+custom_colors$cell_cycle <- setNames(
+  c('#45aaf2', '#f1c40f', '#e74c3c', '#7f8c8d'),
+  c('G1',      'S',       'G2M',     '-')
+)
+
+##Formats
+niceFormat <- function(number) {
+  formatC(number, format = 'f', big.mark = ',', digits = 0)
+}
+
+```
+Sequencing Report for isolates collected in Ghana
+Summary Tables
+```{r, echo=FALSE, warning=FALSE, comment=TRUE}
+MetaPangoNext <- read.csv("/Users/collinsmisita/OneDrive - University of Ghana/008_Waccbip_Analysis/003_Covid/009_merged_lineage_reports/MetaPangoNext_Report.csv")
+
+MetaPangoNext$Curated.month.year <- factor(
+  MetaPangoNext$Curated.month.year,levels = c("Jun, 2020", "Jul, 2020", "Aug, 2020", "Sep, 2020", "Oct, 2020", "Nov, 2020",  "Dec, 2020",  "Jan, 2021", "Feb, 2021", "Mar, 2021", "Apr, 2021", "May, 2021", "Jun, 2021", "Jul, 2021", "Aug, 2021", "Sep, 2021", "Unknown"))
+
+MetaPangoNext$waccbipQc2[is.na(MetaPangoNext$waccbipQc2)] <- "Good"
+MetaPangoNext_QC <- MetaPangoNext %>% filter(waccbipQc2 == "Good") %>% filter(!is.na(Virus.name)) %>%  filter(!is.na(seqName))
+MetaPangoNext_traveller <- MetaPangoNext_QC %>% filter(Travel_info == "Traveler" | Travel_info == "UHAS-Traveler") %>% filter(Host_GIS == "Human")
+To_be_submitted <- MetaPangoNext_QC %>% filter(Travel_info !=   "Nigeria") %>% filter(To_be_submitted_GIS != "NA") 
+To_be_submitted_b <- MetaPangoNext_QC %>% filter(Travel_info ==   "Local") %>% filter(To_be_submitted_GIS != "NA") 
+MetaPangoNext_Local_T <- MetaPangoNext_QC %>% filter(Travel_info !=   "Nigeria") %>% filter(Host_GIS == "Human") 
+MetaPangoNext_Local_T <- dplyr::bind_rows(MetaPangoNext_Local_T,To_be_submitted)
+MetaPangoNext_Local <- MetaPangoNext_QC %>% filter(Travel_info == "Local" | Travel_info == "UHAS") %>% filter(Host_GIS == "Human")
+MetaPangoNext_Local <- dplyr::bind_rows(MetaPangoNext_Local,To_be_submitted_b)
+MetaPangoNext_2021 <- MetaPangoNext_Local %>% filter(Curated.Year.b == "2021")
+MetaPangoNext_2020 <- MetaPangoNext_Local %>% filter(Curated.Year.b == "2020")
+phylogenetics <- MetaPangoNext_Local_T
+MetaPangoNext_deltaplus <- MetaPangoNext_Local %>% filter(Variant == "AY.* (Delta Plus)")
+#QC Report
+write.csv(MetaPangoNext_QC, "/Users/collinsmisita/OneDrive - University of Ghana/008_Waccbip_Analysis/003_Covid/009_merged_lineage_reports/MetadataPangolinNextstrain_Report_Waccbip_QC2.csv")
+
+
+ table <- table(MetaPangoNext_QC$segment)
+ #table %>% knitr::kable(caption = "Total Number of Genomes that Passed QC)")
+ 
+table <- table(MetaPangoNext_QC$Host_GIS)
+ #table %>% knitr::kable(caption = "Total Number of GISAID Submitted Sequences)")
+#
+ table <- table(MetaPangoNext_Local_T$Travel_info)
+ table %>% knitr::kable(caption = "Total Genomes in Local vs Travelers")
+ write.csv(MetaPangoNext_Local_T, "/Users/collinsmisita/OneDrive - University of Ghana/007_Waccbip_Manuscripts/Covid-2021_manuscript/RawData_23_Oct_2021.csv")
+
+#
+ table <- table(MetaPangoNext_Local_T$Curated.Year.b)
+# table %>% knitr::kable(caption = "Total Genomes Sequenced per Year")
+#
+ table <- MetaPangoNext_Local_T %>%  dplyr::group_by(Travel_info, Curated.Year.b) %>% dplyr::summarize(count = n())
+ table %>% knitr::kable(caption = "No. of Genomes on Travel information & Sampling Year")
+#
+ #table <- MetaPangoNext_QC %>%  dplyr::group_by(Sequencing_Batch, Travel_info) %>% dplyr::summarize(count = n())
+ #table %>% knitr::kable(caption = "No. of Genomes per Sequencing Run (Pass QC),  & Travel information")
+#
+#table <- MetaPangoNext_QC %>%  dplyr::group_by(Sequencing_Batch, Travel_info, Curated.Year.b) %>% dplyr::summarize(count = n())
+#table %>% knitr::kable(caption = "No. of Genomes per Sequencing Run (Pass QC),  & Travel information & Sampling Year")
+#
+ table <- table(MetaPangoNext_Local$Curated.Region)
+ table %>% knitr::kable(caption = "No. of Genomes by sampling Regions")
+#
+ #table <- MetaPangoNext_QC %>%  dplyr::group_by(Curated.Region, Curated.Year.b) %>% dplyr::summarize(count = n())
+ #table %>% knitr::kable(caption = "No. of Genomes per Region & Year")
+#
+ table <- table(MetaPangoNext_Local$Curated.month.year)
+
+ table %>% knitr::kable(caption = "No. of Genomes by sampling month and year")
+ 
+```
+
+2) Overall Summary for all the Ghana Genomes (Both Locals and Travelers)
+
+```{r, echo=FALSE, warning=FALSE}
+plot_counts <- MetaPangoNext_Local_T %>%  dplyr::group_by(Variant, Travel_info) %>% dplyr::summarize(count = n()) %>% 
+  tidyr::spread(Travel_info, count, fill = 0) %>% dplyr::ungroup() %>% dplyr::mutate(Total = rowSums(.[c(2:ncol(.))])) %>% dplyr::select(c("Variant", "Total", dplyr::everything())) %>% arrange(desc(Total))
+plot_counts %>%  knitr::kable(caption = "Overall gisaid Variants detected in Ghana")
+
+
+#Convert all Variants below 4 to other Variants
+#Subset data for various plots
+plot_counts_voc <- plot_counts %>% select(c("Variant", "Local", "Traveler", "Total")) %>% filter(Variant %in% c("B.1.1.7 (Alpha)", "B.1.351 (Beta)", "B.1.617.2 (Delta)","B.1.525 (Eta)","B.1.617.1 (Kappa)","B.1.526 (Iota)", "AY.* (Delta Plus)"))
+plot_counts_others <- plot_counts %>% select(c("Variant", "Local", "Traveler", "Total")) %>% filter(Total <= 4)
+plot_counts <- plot_counts %>% select(c("Variant", "Local", "Traveler", "Total")) %>% mutate(Variant = case_when(Total <= 4 ~ "Other Variants",TRUE ~ as.character(Variant)))
+
+#Summarize the Variants
+plot_counts1 <- plot_counts %>% filter(Variant != "Other Variants")
+plot_counts2 <- plot_counts %>% filter(Variant == "Other Variants")
+plot_counts3 <- plot_counts2 %>% group_by(Variant) %>% summarise(across(Local:Total, sum))
+plot_counts4 <- dplyr::bind_rows(plot_counts1,plot_counts3)
+plot_counts5 <- plot_counts4 %>% summarise(across(Local:Total, sum)); rownames(plot_counts5)[rownames(plot_counts5) == "1"] <- "Grand Total"
+plot_counts6 <- column_to_rownames(plot_counts4, "Variant")
+plot_counts7 <- dplyr::bind_rows(plot_counts6,plot_counts5)
+plot_counts <- rownames_to_column(plot_counts7, "Variant")
+plot_counts_Final <- plot_counts 
+plot_counts_Final %>%  knitr::kable(caption = "Overall gisaid Variants detected in Ghana")
+
+#Plot pie chart for all samples
+plot_counts <- plot_counts4
+plot_counts$color <- NA
+plot_counts$value <- plot_counts$Total
+plot_counts$label <- plot_counts$Variant
+plot_counts <- plot_counts %>%select(-c('Total', "Local", "Variant")) 
+advanced.pie <- plot_counts %>% pier() %>%
+  pie.size(inner=70, outer=100, width = 600, height = 450) %>%
+  pie.header(text='Pangolin Lineages', font='Impact', location='pie-center') %>%
+  pie.subtitle(text='Overall (n=1077)') %>%
+  pie.footer(text='Dynamic', location = 'bottom-left') %>%
+  pie.tooltips() %>%  pie.labels(text = element_text(size = 18))
+advanced.pie
+
+#Plot Table for the others
+plot_countsX <- plot_counts_others %>% summarise(across(Local:Total, sum))
+rownames(plot_countsX)[rownames(plot_countsX) == "1"] <- "Grand Total" 
+plot_countsX2 <- rownames_to_column(plot_countsX, "Variant")
+plot_countsX3 <- dplyr::bind_rows(plot_counts_others,plot_countsX2)
+plot_countsX3 %>%  knitr::kable(caption = "Overall gisaid Variants detected in Ghana")
+
+
+#Plot Table for VOCs
+plot_countsZ <- plot_counts_voc %>% summarise(across(Local:Total, sum))
+rownames(plot_countsZ)[rownames(plot_countsZ) == "1"] <- "Grand Total" 
+plot_countsZ2 <- rownames_to_column(plot_countsZ, "Variant")
+plot_countsZ3 <- dplyr::bind_rows(plot_counts_voc,plot_countsZ2)
+plot_countsZ3 %>%  knitr::kable(caption = "Overall gisaid Variants detected in Ghana")
+
+#plot pie chart
+plot_counts <- plot_counts_voc
+plot_counts$color <- NA
+plot_counts$value <- plot_counts$Total
+plot_counts$label <- plot_counts$Variant
+plot_counts <- plot_counts %>%select(-c('Total', "Local", "Variant")) 
+advanced.pie <- plot_counts %>% pier() %>%
+  pie.size(inner=70, outer=100, width = 600, height = 450) %>%
+  pie.header(text='Pangolin Variants', font='Impact', location='pie-center') %>%
+  pie.subtitle(text='VOC - Overall') %>%
+  pie.footer(text='Dynamic', location = 'bottom-left') %>% pie.tooltips()
+advanced.pie
+
+```
+
+
+2) Travelers
+
+```{r, echo=FALSE, warning=FALSE}
+
+#plot Table for local samples only
+plot_counts <- plot_counts_Final %>% select(-c("Local", "Total"))
+plot_counts %>%  knitr::kable(caption = "Overall gisaid Variants detected in Ghana")
+
+#Plot pie chart for Traveler samples
+plot_counts <- plot_counts4
+plot_counts$color <- NA
+plot_counts$value <- plot_counts$Traveler
+plot_counts$label <- plot_counts$Variant
+advanced.pie <- plot_counts %>% pier() %>%
+  pie.size(inner=70, outer=100, width = 600, height = 450) %>%
+  pie.header(text='Pangolin Lineages', font='Impact', location='pie-center') %>%
+  pie.subtitle(text='Travelers (n=106)') %>%
+  pie.footer(text='Dynamic', location = 'bottom-left') %>%
+  pie.tooltips() %>%  pie.labels(text = element_text(size = 18))
+advanced.pie
+
+#Plot Table for the others
+plot_counts_Traveler <- plot_countsX3 %>% select(-c("Local", "Total")) %>% filter(Traveler != 0)
+#plot_counts_Traveler %>%  knitr::kable(caption = "Other Variants (Overall) detected in Ghana")
+
+##Plot VOC for traveller
+plot_counts <- plot_counts_voc
+plot_counts$color <- NA
+plot_counts$value <- plot_counts$Traveler
+plot_counts$label <- plot_counts$Variant
+advanced.pie <- plot_counts %>% pier() %>%
+  pie.size(inner=70, outer=100, width = 600, height = 450) %>%
+  pie.header(text='Pangolin Lineages', font='Impact', location='pie-center') %>%
+  pie.subtitle(text='VOC - Traveler Samples') %>%
+  pie.footer(text='Dynamic', location = 'bottom-left') %>% pie.tooltips()
+advanced.pie
+```
+
+2) Locals
+
+```{r, echo=FALSE, warning=FALSE}
+#plot Table for local samples only
+plot_counts <- plot_counts_Final %>% select(-c("Traveler", "Total"))
+plot_counts %>%  knitr::kable(caption = "Overall gisaid Variants detected in Ghana")
+
+#Plot pie chart for Traveler samples
+plot_counts <- plot_counts4
+plot_counts$color <- NA
+plot_counts$value <- plot_counts$Local
+plot_counts$label <- plot_counts$Variant
+
+advanced.pie <- plot_counts %>%
+  pier() %>%
+  pie.size(inner=70, outer=100, width = 600, height = 450) %>%
+  pie.header(text='Pangolin Lineages', font='Impact', location='pie-center') %>%
+  pie.subtitle(text='Local Samples') %>%
+  pie.footer(text='Dynamic', location = 'bottom-left') %>%
+  pie.tooltips() %>% 
+  pie.labels(text = element_text(size = 18))
+advanced.pie
+
+#Plot Table for the others
+plot_counts_local <- plot_countsX3 %>% select(-c("Traveler", "Total")) %>% filter(Local != 0)
+#plot_counts_local %>%  knitr::kable(caption = "Overall gisaid Variants detected in Ghana")
+
+##Plot VOC for traveller
+plot_counts <- plot_counts_voc
+plot_counts$color <- NA
+plot_counts$value <- plot_counts$Local
+plot_counts$label <- plot_counts$Variant
+advanced.pie <- plot_counts %>%
+  pier() %>%
+  pie.size(inner=70, outer=100, width = 600, height = 450) %>%
+  pie.header(text='Pangolin Lineages', font='Impact', location='pie-center') %>%
+  pie.subtitle(text='VOC - Local Samples') %>%
+  pie.footer(text='Dynamic', location = 'bottom-left') %>%
+  pie.tooltips()
+advanced.pie
+
+```
+
+5) Variant Summary across Month and Year for Local Genomes Only
+
+```{r, echo=FALSE, warning=FALSE, comment=TRUE}
+###Month Clade Comparison swapped
+
+plot_counts <- MetaPangoNext_Local %>%  dplyr::group_by(Variant, Curated.month.year) %>% dplyr::summarize(count = n()) %>% tidyr::spread(Curated.month.year, count, fill = 0) %>% dplyr::ungroup() %>% dplyr::mutate(Total = rowSums(.[c(2:ncol(.))])) %>% dplyr::select(c("Variant", "Total", dplyr::everything())) %>% arrange(desc(Total))
+plot_counts %>%  knitr::kable(caption = "Overall gisaid Variants detected in Ghana")
+#Convert all Variants below 2 to other Variants
+plot_counts <- plot_counts %>% mutate(Variant = case_when(Total <= 4 ~ "Other Variants", TRUE ~ as.character(Variant)))
+
+
+#Plot the summarized table
+plot_counts1 <- plot_counts %>% filter(Variant != "Other Variants")
+plot_counts2 <- plot_counts %>% filter(Variant == "Other Variants")
+plot_counts3 <- plot_counts2 %>% group_by(Variant) %>% summarise(across(Total:`Aug, 2021`, sum))
+plot_counts4 <- dplyr::bind_rows(plot_counts1,plot_counts3)
+plot_counts5 <- plot_counts4 %>% summarise(across(Total:`Aug, 2021`, sum)); rownames(plot_counts5)[rownames(plot_counts5) == "1"] <- "Grand Total"
+plot_counts6 <- rownames_to_column(plot_counts5, "Variant")
+plot_counts7 <- dplyr::bind_rows(plot_counts4,plot_counts6) %>% select("Variant", "Jun, 2020", "Jul, 2020", "Aug, 2020", "Sep, 2020", "Oct, 2020", "Nov, 2020",  "Dec, 2020",  "Jan, 2021", "Feb, 2021", "Mar, 2021", "Apr, 2021", "May, 2021", "Jun, 2021", "Jul, 2021", "Aug, 2021", "Sep, 2021", "Total")# "Jul, 2021",
+plot_counts7 %>%  knitr::kable(caption = "Overall gisaid Variants detected in Ghana")
+
+
+plot_counts7 <- plot_counts4 %>% select("Variant", "Jun, 2020", "Jul, 2020", "Aug, 2020", "Sep, 2020", "Oct, 2020", "Nov, 2020",  "Dec, 2020",  "Jan, 2021", "Feb, 2021", "Mar, 2021", "Apr, 2021", "May, 2021", "Jun, 2021", "Jul, 2021", "Aug, 2021", "Sep, 2021")# "Jul, 2021",
+row.names(plot_counts7) <- plot_counts7$Variant; #plot_counts7$Variant <- NULL;
+plot_counts8 <- plot_counts7 %>% select(-c("Variant"))
+plot_counts8 <- as.matrix(plot_counts8)
+data3d <- prop.table(plot_counts8, 2)
+data3d <- as.data.frame(data3d)
+
+#Generate plots
+p1 <- plot_counts %>%select(-c('Total')) %>% reshape2::melt(id.vars = 'Variant') %>%
+  ggplot(aes(variable, value)) + geom_bar(aes(fill = Variant), position = 'fill', stat = 'identity', show.legend = TRUE) +
+  scale_fill_manual(name = 'Variant(Local)', values = custom_colors$discrete) + coord_cartesian(clip = 'off') +
+  scale_y_continuous(name = 'Percentage', labels = scales::percent, expand = c(0.01,0)) + theme_bw() +
+  #ggtitle("B) Dynamics of gisaid Variants from 2020 to 2021-Locals") +
+  theme(legend.position = 'right', plot.title = element_text(hjust = 0.5), text = element_text(size = 12),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1), plot.margin = margin(t = 20, r = 0, b = 0, l = 0, unit = 'pt')); p1
+ggsave('/Users/collinsmisita/OneDrive - University of Ghana/008_Waccbip_Analysis/003_Covid/009_merged_lineage_reports/Figures/Curated.Month.Year_Variant_all.svg', p1, width = 6, height = 4)
+
+
+plot_counts <- MetaPangoNext_traveller %>%  dplyr::group_by(Variant, Curated.month.year) %>% dplyr::summarize(count = n()) %>% tidyr::spread(Curated.month.year, count, fill = 0) %>% dplyr::ungroup() %>% dplyr::mutate(Total = rowSums(.[c(2:ncol(.))])) %>% dplyr::select(c("Variant", "Total", dplyr::everything())) %>% arrange(desc(Total))
+#plot_counts %>%  knitr::kable(caption = "Overall gisaid Variants detected in Ghana")
+
+#Convert all Variants below 2 to other Variants
+plot_counts <- plot_counts %>% mutate(Variant = case_when(Total <= 4 ~ "Other Variants",TRUE ~ as.character(Variant)))
+
+#Plot summarized Table
+#Plot the summarized table
+#Plot the summarized table
+plot_counts1 <- plot_counts %>% filter(Variant != "Other Variants")
+plot_counts2 <- plot_counts %>% filter(Variant == "Other Variants")
+plot_counts3 <- plot_counts2 %>% group_by(Variant) %>% summarise(across(Total:`Mar, 2021`, sum))
+plot_counts4 <- dplyr::bind_rows(plot_counts1,plot_counts3)
+plot_counts5 <- plot_counts4 %>% summarise(across(Total:`Mar, 2021`, sum)); rownames(plot_counts5)[rownames(plot_counts5) == "1"] <- "Grand Total"
+plot_counts6 <- rownames_to_column(plot_counts5, "Variant")
+plot_counts7 <- dplyr::bind_rows(plot_counts4,plot_counts6) %>% select("Variant",  "Jan, 2021", "Mar, 2021", "Total")
+#plot_counts7 %>%  knitr::kable(caption = "Overall gisaid Variants detected in Ghana")
+
+#Generate plots
+p2 <- plot_counts %>%select(-c('Total')) %>% reshape2::melt(id.vars = 'Variant') %>%
+  ggplot(aes(variable, value)) + geom_bar(aes(fill = Variant), position = 'fill', stat = 'identity', show.legend = TRUE) +
+  scale_fill_manual(name = 'Variant (Travelers)', values = custom_colors$discrete) + coord_cartesian(clip = 'off') +
+  scale_y_continuous(name = 'Percentage', labels = scales::percent, expand = c(0.01,0)) + theme_bw() +
+  ggtitle("B) Dynamics of gisaid Variants from 2020 to 2021 - Travellers") +
+  theme(legend.position = 'right', plot.title = element_text(hjust = 0.5), text = element_text(size = 12),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1), plot.margin = margin(t = 20, r = 0, b = 0, l = 0, unit = 'pt')); #p2
+ggsave('/Users/collinsmisita/OneDrive - University of Ghana/008_Waccbip_Analysis/003_Covid/009_merged_lineage_reports/Figures/Curated.Month.Year_Variant_Traveler.svg', p2 , width = 3, height = 4)
+```
+
+6) Variant Summary by Sampling Region in Ghana
+
+```{r, echo=FALSE,warning=FALSE}
+
+###Location & Variant Comparison
+plot_counts <- MetaPangoNext_2021 %>%  dplyr::group_by(Variant, Curated.Region) %>% dplyr::summarize(count = n()) %>% 
+  tidyr::spread(Curated.Region, count, fill = 0) %>% dplyr::ungroup() %>% dplyr::mutate(Total = rowSums(.[c(2:ncol(.))])) %>% dplyr::select(c("Variant", "Total", dplyr::everything())) %>% arrange(desc(Total))
+#plot_counts %>% knitr::kable(caption = "Gisaid Variants by Regions - Local samples (2021)")
+
+plot_counts3 <- plot_counts %>% summarise(across(Total:`Western`, sum))
+rownames(plot_counts3)[rownames(plot_counts3) == "1"] <- "Grand Total"
+plot_counts6 <- rownames_to_column(plot_counts3, "Variant")
+plot_counts7 <- dplyr::bind_rows(plot_counts,plot_counts6) %>% select("Variant", "Ashanti", "Bono East", "Central", "Eastern", "Greater Accra", "Northern", "Upper East", "Volta", "Western", "Total")
+plot_counts7 %>%  knitr::kable(caption = "Overall gisaid Variants detected in Ghana")
+
+
+#Convert all Variants below 2 to other Variants
+plot_counts <- plot_counts %>% mutate(Variant = case_when(Total <= 6 ~ "Other (n<=6)",TRUE ~ as.character(Variant)))
+
+#Generate plot
+p1 <- plot_counts %>%select(-c('Total')) %>% reshape2::melt(id.vars = 'Variant') %>%
+  ggplot(aes(variable, value)) + geom_bar(aes(fill = Variant), position = 'fill', stat = 'identity', show.legend = TRUE) +
+  scale_fill_manual(name = 'Variant', values = custom_colors$discrete) + coord_cartesian(clip = 'off') +
+  scale_y_continuous(name = 'Percentage', labels = scales::percent, expand = c(0.01,0)) + theme_bw() +
+  ggtitle("Variants by Regions (2021)") +
+  theme(legend.position = 'right', plot.title = element_text(hjust = 0.5), text = element_text(size = 12),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1), plot.margin = margin(t = 20, r = 0, b = 0, l = 0, unit = 'pt'))
+
+ggsave('/Users/collinsmisita/OneDrive - University of Ghana/008_Waccbip_Analysis/003_Covid/009_merged_lineage_reports/Figures/Curated.Region_Variant_2021.svg', 
+       p1, width = 5, height = 5)
+p1
+
+###Location & Variant Comparison
+plot_counts <- MetaPangoNext_2020 %>%  dplyr::group_by(Variant, Curated.Region) %>% dplyr::summarize(count = n()) %>% 
+  tidyr::spread(Curated.Region, count, fill = 0) %>% dplyr::ungroup() %>% dplyr::mutate(Total = rowSums(.[c(2:ncol(.))])) %>% dplyr::select(c("Variant", "Total", dplyr::everything())) %>% arrange(desc(Total))
+
+plot_counts3 <- plot_counts %>% summarise(across(Total:`Western`, sum))
+rownames(plot_counts3)[rownames(plot_counts3) == "1"] <- "Grand Total"
+plot_counts6 <- rownames_to_column(plot_counts3, "Variant")
+plot_counts7 <- dplyr::bind_rows(plot_counts,plot_counts6) %>% select("Variant", "Ashanti", "Central", "Eastern", "Greater Accra", "Volta", "Western", "Total")
+plot_counts7 %>%  knitr::kable(caption = "Overall gisaid Variants detected in Ghana")
+
+#Convert all Variants below 2 to other Variants
+plot_counts <- plot_counts %>% mutate(Variant = case_when(Total <= 4 ~ "Other (n<=4)",TRUE ~ as.character(Variant)))
+
+#Generate plot
+p2 <- plot_counts %>%select(-c('Total')) %>% reshape2::melt(id.vars = 'Variant') %>%
+  ggplot(aes(variable, value)) + geom_bar(aes(fill = Variant), position = 'fill', stat = 'identity', show.legend = TRUE) +
+  scale_fill_manual(name = 'Variant', values = custom_colors$discrete) + coord_cartesian(clip = 'off') +
+  scale_y_continuous(name = 'Percentage', labels = scales::percent, expand = c(0.01,0)) + theme_bw() +
+  ggtitle("Variants by Regions (2020)") +
+  theme(legend.position = 'right', plot.title = element_text(hjust = 0.5), text = element_text(size = 12),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1), plot.margin = margin(t = 20, r = 0, b = 0, l = 0, unit = 'pt'))
+ggsave('/Users/collinsmisita/OneDrive - University of Ghana/008_Waccbip_Analysis/003_Covid/009_merged_lineage_reports/Figures/Curated.Region_Variant_2020.svg', 
+       p2 , width = 5, height = 5)
+p2
+
+#######################################################################################################################
+```
+Plotting heatmap for mutations
+```{r, echo=FALSE, warning=FALSE, comment=TRUE}
+
+library(dplyr)
+library(splitstackshape)
+library(gtools)
+
+#data5 <- data3 %>% separate(date1, c("Country","Location", "Year", "Date Collection", "Date Submitted"), sep = "([/|])")
+
+
+#Select the relevant columns
+data <- MetaPangoNext_Local %>% select(c("Virus.name", "Travel_info","Curated.Year.b", "Curated.month.year", "Curated.Region", "Variant", "aaSubstitutions", "substitutions"))
+
+#Use the splitstackshape package to split the columns
+data2 <- concat.split.multiple(
+  data, split.cols = c("substitutions", "aaSubstitutions"),
+  seps = ",", direction = "long")
+
+#generate a column with gene names
+data2$genes <- data2$aaSubstitutions
+data2$genes <- gsub(":.*","",data2$genes, perl = TRUE)
+
+#generate a column with just amino acid mutations
+data2$aaMutation <- data2$aaSubstitutions
+data2$aaMutation <- gsub(".*:","",data2$aaMutation, perl = TRUE)
+
+###Plot for all samples.. most abundant mutations
+
+##Now you can extract it and plot it
+plot_counts <- data2 %>%  dplyr::group_by(aaSubstitutions, Variant) %>% dplyr::summarize(count = n()) %>% 
+  tidyr::spread(Variant, count, fill = 0) %>% dplyr::ungroup() %>% dplyr::mutate(Total = rowSums(.[c(2:ncol(.))])) %>% dplyr::select(c("aaSubstitutions", "Total", dplyr::everything())) %>% arrange(desc(Total))
+
+#Convert all aaMutation below frequency of 10 to other aaMutation
+plot_counts <- plot_counts %>% mutate(aaSubstitutions = case_when(Total <= 100 ~ "Others (n<200)",TRUE ~ as.character(aaSubstitutions)))
+
+#Summarize the Variants
+plot_counts1 <- plot_counts %>% filter(aaSubstitutions != "Others (n<200)") %>% select(c("aaSubstitutions", "Total")) %>% dplyr::filter(aaSubstitutions != "NA") %>% arrange(desc(Total))
+plot_counts1 <- plot_counts1[order(as.numeric(gsub("([A-Z])", "", plot_counts1$aaSubstitutions, perl = T)), na.last=FALSE) , ]
+library(forcats)
+plot_counts1$aaSubstitutions <- fct_inorder(plot_counts1$aaSubstitutions)
+
+#generate a column with just amino acid mutations
+plot_counts1$gene <- plot_counts1$aaSubstitutions
+plot_counts1$gene <- gsub(":.*","",plot_counts1$gene, perl = TRUE)
+#plot_counts %>% knitr::kable(caption = "Gisaid Variants by Regions - Local samples (2021)")
+
+##Plot the most frequent mutations
+p1 <- ggplot(plot_counts1, aes(x=aaSubstitutions, y=Total, fill=gene)) + 
+  geom_col() + 
+  scale_fill_manual(name = 'Protein', values = custom_colors$discrete) + coord_cartesian(clip = 'off') +
+  scale_y_continuous(limits = c(0, 1000), breaks = seq(0, 1000, by = 200)) +
+  #geom_segment(aes(x=aaSubstitutions, xend=aaSubstitutions,  y=0, yend=Total)) + 
+  #theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+ theme(legend.position = 'right', plot.title = element_text(hjust = 0.5), text = element_text(size = 12),
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1), plot.margin = margin(t = 20, r = 1, b = 1, l = 1, unit = 'pt')); p1
+#p1 + coord_flip()
+ggsave('/Users/collinsmisita/OneDrive - University of Ghana/008_Waccbip_Analysis/003_Covid/009_merged_lineage_reports/Figures/Most abundant mutations  all genes.svg', width = 15, height = 6)
+
+##Select spike protein and VOCs
+
+#now you can easily filter specific group them
+data3 <- data2 %>% dplyr::filter(genes == "S") %>% dplyr::filter(Variant == "B.1.1.7 (Alpha)" |Variant == "B.1.351 (Beta)" |Variant == "B.1.617.1 (Kappa)" |Variant == "B.1.1" |Variant == "B.1" |Variant == "A.27" |Variant == "A.23.1" |Variant == "B.1.617.2 (Delta)" |Variant == "B.1.525 (Eta)"  |Variant == "B.1.526 (Iota)" |Variant == "B.1.1.318" | Variant == "AY.* (Delta Plus)"); dim(data3)
+
+##Now you can extract it and plot it
+plot_counts <- data3 %>%  dplyr::group_by(aaMutation, Variant) %>% dplyr::summarize(count = n()) %>% 
+  tidyr::spread(Variant, count, fill = 0) %>% dplyr::ungroup() %>% dplyr::mutate(Total = rowSums(.[c(2:ncol(.))])) %>% dplyr::select(c("aaMutation", "Total", dplyr::everything())) %>% arrange(desc(Total))
+#plot_counts %>% knitr::kable(caption = "Gisaid Variants by Regions - Local samples (2021)")
+#Convert all aaMutation below frequency of 10 to other aaMutation
+plot_counts <- plot_counts %>% mutate(aaMutation = case_when(Total <= 2 ~ "Others (n<2)",TRUE ~ as.character(aaMutation)))
+
+#Summarize the Variants
+plot_counts1 <- plot_counts %>% filter(aaMutation != "Others (n<2)")
+plot_counts <- as.data.frame(plot_counts1)
+row.names(plot_counts) <- plot_counts$aaMutation; plot_counts$aaMutation <- NULL; plot_counts$Total <- NULL;
+plot_counts[] <- lapply(plot_counts, function(x) ifelse(x>1, 1, x))
+plot_counts <- rownames_to_column(plot_counts, "mutation")
+plot_counts <- plot_counts[order(as.numeric(gsub("([A-Z])", "", plot_counts$mutation, perl = T)), na.last=FALSE) , ]
+rownames(plot_counts) <- plot_counts$mutation
+plot_counts <- plot_counts %>% dplyr::select(-c("mutation"))
+plot_counts %>% knitr::kable(caption = "Gisaid Variants by Regions - Local samples (2021)")
+
+p1 <- pheatmap(plot_counts,  color = colorRampPalette((brewer.pal(n = 6, name = "Purples")))(100), cluster_rows = F,
+         cluster_cols = F, clustering_distance_rows = "correlation",  treeheight_row = 0, treeheight_col = 0); p1
+
+ggsave('/Users/collinsmisita/OneDrive - University of Ghana/008_Waccbip_Analysis/003_Covid/009_merged_lineage_reports/Figures/Spike_mutations.svg', p1, width = 4, height = 12)
+
+##Now you can extract it and plot it
+plot_counts <- data3 %>%  dplyr::group_by(aaMutation, Variant) %>% dplyr::summarize(count = n()) %>% 
+  tidyr::spread(Variant, count, fill = 0) %>% dplyr::ungroup() %>% dplyr::mutate(Total = rowSums(.[c(2:ncol(.))])) %>% dplyr::select(c("aaMutation", "Total", dplyr::everything())) %>% arrange(desc(Total))
+plot_counts %>% knitr::kable(caption = "Gisaid Variants by Regions - Local samples (2021)")
+#Convert all aaMutation below frequency of 10 to other aaMutation
+plot_counts <- plot_counts %>% mutate(aaMutation = case_when(Total <= 2 ~ "Others (n<2)",TRUE ~ as.character(aaMutation)))
+
+#Summarize the Variants
+plot_counts1 <- plot_counts %>% filter(aaMutation != "Others (n<2)") %>% select(c("aaMutation", "Total")) %>% 
+  dplyr::filter(aaMutation != "NA") %>% arrange(desc(Total))
+plot_counts1 <- plot_counts1[order(as.numeric(gsub("([A-Z])", "", plot_counts1$aaMutation, perl = T)), na.last=FALSE) , ]
+library(forcats)
+plot_counts1$aaMutation <- fct_inorder(plot_counts1$aaMutation)
+
+##Plot the most frequent mutations
+p1 <- ggplot(plot_counts1, aes(x=aaMutation, y=Total)) + 
+  geom_point(size=3) + 
+  geom_segment(aes(x=aaMutation, xend=aaMutation,  y=0, yend=Total)) + 
+  #theme(axis.text.x = element_text(angle=65, vjust=0.6)) +
+ theme(legend.position = 'right', plot.title = element_text(hjust = 0.5), text = element_text(size = 12),
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1), plot.margin = margin(t = 20, r = 1, b = 1, l = 1, unit = 'pt')); p1
+#p1 + coord_flip()
+ggsave('/Users/collinsmisita/OneDrive - University of Ghana/008_Waccbip_Analysis/003_Covid/009_merged_lineage_reports/Figures/Most abundant mutations_ spike.svg', width = 12, height = 3)
+
+
+
+```
+
+Global & Ghanaian COVID-19 Trends 
+
+```{r, echo=FALSE, warning=FALSE, comment=FALSE}
+who <- read_csv("/Users/collinsmisita/OneDrive - University of Ghana/008_Waccbip_Analysis/003_Covid/017_Global_Data/WHO-COVID-19-global-data.csv")
+
+
+Africa <- who %>%
+  filter(WHO_region == "AFRO")
+
+west_africa_list <- c("Nigeria","Ghana","Cameroon","Niger","Burkina Faso", 
+                      "Mali","Senegal","Guinea","Benin","Togo","Sierra Leone", 
+                      "Liberia","Mauritania","Gambia","Guinea Bissau", 
+                      "Cape Verde")
+
+west_africa <- who %>%
+  filter(Country == west_africa_list) %>%
+  select(Date_reported,Country,New_cases)
+
+West_Africa <- west_africa %>% rename(West_Africa = New_cases)
+  
+Ghana <- who %>%
+  filter(Country == "Ghana")
+
+newCases <- 
+  ggplot() +
+  #geom_line(aes(x = who$Date_reported, y = log(who$New_cases),color = "New_cases_worldwide")) +
+  geom_line(aes(x = Africa$Date_reported, y = log(Africa$New_cases),color = "New_cases_Africa")) +
+  #geom_line(aes(x = West_Africa$Date_reported, y = log(West_Africa$West_Africa),color = "New_cases_West_Africa")) +
+  geom_line(aes(x = Ghana$Date_reported, y = log(Ghana$New_cases), color = "New_cases_Ghana")) +
+  scale_x_date(date_breaks = "1 month", date_labels = "%d %b") +
+  scale_y_continuous(labels = scales::comma) +
+  labs( x = "Dates", y = "Number of new cases",
+        title = "") +
+    theme_bw() +
+  theme(legend.position = 'top', plot.title = element_text(hjust = 0.5), text = element_text(size = 12),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1), plot.margin = margin(t = 20, r = 0, b = 0, l = 0, unit = 'pt')) +
+    scale_color_manual(name="", values = c("New_cases_worldwide" = "tan", "New_cases_Africa"="steelblue", "New_cases_West_Africa"="purple", "New_cases_Ghana"="orange")) ; newCases
+
+ggsave('/Users/collinsmisita/OneDrive - University of Ghana/008_Waccbip_Analysis/003_Covid/009_merged_lineage_reports/Figures/newCase_all.png', newCases, width = 5, height = 4)
+
+```
+
+```{r, echo=FALSE, warning=FALSE, comment=FALSE}
+
+#Select the relevant columns
+data <- MetaPangoNext_Local %>% select(c("Virus.name", "Travel_info","Curated.Year.b", "Collection_date", "Curated.month.year", "totalSubstitutions", "totalAminoacidSubstitutions", "Curated.Region", "Variant", "aaSubstitutions", "substitutions")) %>% filter(!is.na(Collection_date)) %>% filter(Collection_date != "Unknown")
+
+#now you can easily filter specific group them
+data3 <- data %>% dplyr::filter(Variant == "B.1.1.7 (Alpha)" |Variant == "B.1.351 (Beta)" |Variant == "B.1.617.1 (Kappa)" |Variant == "B.1.1" |Variant == "B.1" |Variant == "A.27" |Variant == "A.23.1" |Variant == "B.1.617.2 (Delta)" |Variant == "B.1.525 (Eta)"  |Variant == "B.1.526 (Iota)" |Variant == "B.1.1.318"); dim(data3)
+
+#Fever
+metadata2 <- data %>% select(c(totalSubstitutions, Curated.month.year, Variant)) %>% filter(!is.na(Curated.month.year))
+p2 <- ggplot(metadata2, aes(x=Variant, y=totalSubstitutions)) +
+  geom_count(width=0.08, color="black", position=position_dodge(width = 0.9)) + theme_bw() + 
+  #scale_fill_manual(values=c("red", "blue")) + theme(text=element_text(size=12)) +
+  theme(axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0)), 
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        axis.text.x = element_text(angle = 25, hjust = 1, vjust = 1)) +
+  labs(x="Variant ", size = 10) + labs(y="Number of mutations", size = 10) + coord_flip(); p2
+
+ggsave('/Users/collinsmisita/OneDrive - University of Ghana/008_Waccbip_Analysis/003_Covid/009_merged_lineage_reports/Figures/mutation_Frequency_Perlineage.svg', p2, width = 6, height = 8)
+
+
+```
+
+
+PHYLOGENETICS
+
+
+A) Phylogeny of top 5 variants
+
+```{r, echo=FALSE,warning=FALSE}
+# 
+# tree<-read.newick('/Users/collinsmisita/OneDrive - University of Ghana/008_Waccbip_Analysis/003_Covid/015_nextstrain/ncov/results/global/tree.nwk')
+# 
+# #tree_raw<-read.newick('/Users/collinsmisita/OneDrive - University of Ghana/008_Waccbip_Analysis/003_Covid/015_nextstrain/ncov/results/global/tree_raw.nwk')
+# 
+# 
+# meta <- as.data.frame(tree$tip.label)
+# 
+# #Merge the datasets
+# metadata_df <-merge(meta,phylogenetics, by.x ="tree$tip.label", by.y = "strain", all.x = TRUE)
+# row.names(metadata_df) <- metadata_df$`tree$tip.label`
+# 
+# metadata_df <- metadata_df %>% rename(date_submitted = Collection.date) %>% rename(variant = Variant) %>%
+#   rename(date = Collection_date) %>% rename(location = District) %>% rename(length = alignmentEnd) %>%
+#   rename(sex = Gender)  %>% rename(gisaid_epi_isl = Accession.ID)  %>% rename(genbank_accession = Accession)
+# 
+# 
+# metadata_df$date <- dmy(metadata_df$date)
+# metadata_df$days<-as.Date(cut(metadata_df$date,breaks = "day",start.on.monday = FALSE))
+# metadata_df$date2<-as.Date(cut(metadata_df$date,breaks = "2 weeks",start.on.monday = FALSE))
+# metadata_df$date3<-as.Date(cut(metadata_df$date,breaks = "1 month",start.on.monday = FALSE))
+# 
+# 
+# custom3<-c('antiquewhite2',"tan4",'peachpuff3','palegreen3','dodgerblue1','hotpink2','mediumorchid3','blue3','skyblue1','purple4',
+#            'mediumpurple','darkseagreen4','cadetblue3','thistle3','deeppink3',
+#            #custom2<-c("darkolivegreen",'darkseagreen3','darkseagreen2','antiquewhite2','peachpuff3','tan4',
+#            'red3','grey30','darkolivegreen','slategray1','plum2',
+#            'white','white')
+# 
+# p<-ggtree(tree, as.Date=TRUE, mrsd="2021-09-08", color='black',size=0.2) + theme_tree2()+
+#   expand_limits(y = 2)+ theme_tree2() +
+#   theme(axis.text.x = element_text(size=10,angle=90)) +
+#   geom_nodepoint(color="grey82", alpha=1/4, size=0.5) #+
+#   #geom_tiplab(align=FALSE, linesize=.1) 
+# 
+# 
+# colors <- c("variant" = "blue")
+# p <- p %<+% metadata_df +
+#   geom_tippoint(aes(
+#     subset=(region=='Africa')),fill='white',size=3,align=F,stroke=0.2,color='grey36',shape=21)+
+#   geom_tippoint(aes(
+#     subset=(variant=='B.1.1.7 (Alpha)')),fill='magenta',size=4, stroke=0.2,align=F, color='grey36',shape=21)+
+#   geom_tippoint(aes(
+#     subset=(variant=='A.27')),fill='brown',size=4, stroke=0.2,align=F, color='grey36',shape=21)+
+#   geom_tippoint(aes(
+#     subset=(variant=='B.1.351 (Beta)')),fill='green',size=4,align=F, stroke=0.2,color='grey36',shape=21)+
+#   geom_tippoint(aes(
+#     subset=(variant=='B.1.525 (Eta)')),fill='blue',size=4,align=F, stroke=0.2,color='grey36',shape=21)+
+#   geom_tippoint(aes(
+#     subset=(variant=='B.1.526 (Iota)')),fill='orange',size=4, stroke=0.2,align=F, color='grey36',shape=21)+
+#   geom_tippoint(aes(
+#     subset=(variant=='B.1.617.2 (Delta)')),fill='grey2',size=4, stroke=0.2,align=F, color='grey36',shape=21)+
+#   geom_tippoint(aes(
+#     subset=(variant=='B.1.617.1 (Kappa)')),fill='grey54',size=4, stroke=0.2,align=F, color='grey36',shape=21)+
+#   geom_tippoint(aes(
+#     subset=(variant=='AY.* (Delta Plus)')),fill='red',size=4, stroke=0.2,align=F, color='grey36',shape=21)+
+#     geom_tippoint(aes(
+#     subset=(variant=='B.1.1.318')),fill='cyan',size=4, stroke=0.2,align=F, color='grey36',shape=21)+
+#    scale_color_manual(values = colors) +
+#   scale_x_date(breaks = date_breaks("1 month")) +
+#    theme(legend.position = 'right', plot.title = element_text(hjust = 0.5), text = element_text(size = 12),
+#         panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title.x = element_blank(),
+#         axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1), plot.margin = margin(t = 10, r = 10, b = 10, l = 10, unit = 'pt'))
+# 
+# p
+# 
+# ggsave('/Users/collinsmisita/OneDrive - University of Ghana/008_Waccbip_Analysis/003_Covid/009_merged_lineage_reports/Figures/Phylogeny.svg', p, width = 10, height = 18, units = "cm",limitsize = FALSE)
+
+```
+
